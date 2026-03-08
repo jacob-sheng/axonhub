@@ -26,7 +26,7 @@ spec:
             type: TCP
         volumes:
           - id: data
-            dir: /var/lib/postgresql/data
+            dir: /var/lib/postgresql
         env:
           POSTGRES_DB:
             default: axonhub
@@ -46,15 +46,13 @@ spec:
             expose: true
 
     - name: AxonHub
-      template: GIT
+      template: PREBUILT
       dependencies:
         - PostgreSQL
       domainKey: PUBLIC_DOMAIN
       spec:
         source:
-          source: GITHUB
-          repo: 1053598893
-          branch: unstable
+          image: looplj/axonhub:latest
         ports:
           - id: web
             port: 8090
