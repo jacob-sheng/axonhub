@@ -212,6 +212,18 @@ response = client.chat.completions.create(
 
 Switch models by changing one line: `model="gpt-4"` → `model="claude-3-5-sonnet"`. No SDK changes needed.
 
+### 1-click Deploy to Zeabur
+
+Deploy AxonHub with 1-click on [Zeabur](https://zeabur.com).
+
+<div>
+
+<a href="https://zeabur.com/templates/BHY5UC">
+  <img src="https://zeabur.com/button.svg" alt="Deploy on Zeabur">
+</a>
+
+</div>
+
 ### 1-click Deploy to Render
 
 Deploy AxonHub with 1-click on [Render](https://render.com) for free.

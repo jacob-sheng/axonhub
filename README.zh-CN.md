@@ -194,6 +194,18 @@ cd axonhub_*
 
 就这样！现在配置你的第一个 AI 渠道，开始通过 AxonHub 调用模型。
 
+### 一键部署到 Zeabur | 1-click Deploy to Zeabur
+
+使用 Zeabur 一键部署（默认 PostgreSQL）：
+
+<div>
+
+<a href="https://zeabur.com/templates/BHY5UC">
+  <img src="https://zeabur.com/button.svg" alt="Deploy on Zeabur">
+</a>
+
+</div>
+
 ### 零代码迁移示例 | Zero-Code Migration Example
 
 **你的现有代码无需任何改动。** 只需将 SDK 指向 AxonHub：

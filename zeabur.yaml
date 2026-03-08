@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=https://schema.zeabur.app/template.json
+apiVersion: zeabur.com/v1
+kind: Template
+metadata:
+  name: AxonHub
+spec:
+  description: All-in-one AI development platform. Use any SDK. Access any model. Zero code changes.
+  tags:
+    - AI
+    - Tool
+  variables:
+    - key: PUBLIC_DOMAIN
+      type: DOMAIN
+      name: Domain
+      description: Domain for AxonHub (e.g. "axonhub" -> axonhub.zeabur.app)
+  services:
+    - name: PostgreSQL
+      icon: https://cdn.zeabur.com/marketplace/postgresql.svg
+      template: PREBUILT
+      spec:
+        source:
+          image: postgres:18
+        ports:
+          - id: database
+            port: 5432
+            type: TCP
+        volumes:
+          - id: data
+            dir: /var/lib/postgresql/data
+        env:
+          POSTGRES_DB:
+            default: axonhub
+          POSTGRES_USER:
+            default: axonhub
+          POSTGRES_PASSWORD:
+            default: "${PASSWORD}"
+            expose: true
+          POSTGRES_HOST:
+            default: "${CONTAINER_HOSTNAME}"
+            expose: true
+          POSTGRES_PORT:
+            default: "${DATABASE_PORT}"
+            expose: true
+          POSTGRES_CONNECTION_STRING:
+            default: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+            expose: true
+
+    - name: AxonHub
+      template: GIT
+      dependencies:
+        - PostgreSQL
+      domainKey: PUBLIC_DOMAIN
+      spec:
+        source:
+          source: ARBITRARY_GIT
+          gitURL: https://github.com/looplj/axonhub.git
+          branch: unstable
+        ports:
+          - id: web
+            port: 8090
+            type: HTTP
+        healthCheck:
+          type: HTTP
+          port: web
+          http:
+            path: /health
+        env:
+          AXONHUB_SERVER_PORT:
+            default: "8090"
+          AXONHUB_DB_DIALECT:
+            default: "postgres"
+          AXONHUB_DB_DSN:
+            default: "${POSTGRES_CONNECTION_STRING}?sslmode=disable"
