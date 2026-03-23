@@ -98,9 +98,20 @@ func (m *SmartContextManager) Messages(ctx context.Context) []Message {
 	return messages
 }
 
+func (m *SmartContextManager) ClearMessages(ctx context.Context) {
+	m.ContextManager.ClearMessages(ctx)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now().UTC()
+	m.state = ContextManagerState{UpdatedAt: now}
+	m.lastCompactedAt = time.Time{}
+	m.saveLocked(ctx, nil)
+}
+
 func (m *SmartContextManager) BuildMessages(ctx context.Context) []Message {
 	working := cloneMessages(m.ContextManager.BuildMessages(ctx))
-	var archived []Message
 
 	if !m.config.Enabled {
 		m.logger.Debug("context manager: compaction disabled",
@@ -180,7 +191,6 @@ func (m *SmartContextManager) BuildMessages(ctx context.Context) []Message {
 				)
 
 				m.ContextManager.SetMessages(ctx, working)
-				archived = overflow
 			} else {
 				m.logger.Debug("context manager: summarize skipped",
 					"error", err,
@@ -194,7 +204,8 @@ func (m *SmartContextManager) BuildMessages(ctx context.Context) []Message {
 			)
 		}
 	}
-	m.saveLocked(ctx, working, archived)
+
+	m.saveLocked(ctx, working)
 
 	return cloneMessages(working)
 }
@@ -206,7 +217,7 @@ func (m *SmartContextManager) Snapshot() ContextManagerState {
 	return copyContextState(m.state)
 }
 
-func (m *SmartContextManager) saveLocked(ctx context.Context, messages []Message, archivedMessages []Message) {
+func (m *SmartContextManager) saveLocked(ctx context.Context, messages []Message) {
 	if m.store == nil {
 		return
 	}
@@ -219,7 +230,7 @@ func (m *SmartContextManager) saveLocked(ctx context.Context, messages []Message
 	}
 
 	m.state.RoundIndex = maxRI
-	if err := m.store.Save(ctx, m.state, messages, archivedMessages); err != nil {
+	if err := m.store.Save(ctx, m.state, messages); err != nil {
 		m.logger.Debug("context manager: save failed", "error", err)
 	}
 }

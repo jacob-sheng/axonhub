@@ -5,13 +5,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestContextManagerFileStore_SaveLoadAndArchive(t *testing.T) {
+func TestContextManagerFileStore_SaveLoad(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -26,12 +25,7 @@ func TestContextManagerFileStore_SaveLoadAndArchive(t *testing.T) {
 		newTextMessage(RoleUser, "u2"),
 		newTextMessage(RoleAssistant, "a2"),
 	}
-	archived := []Message{
-		newTextMessage(RoleUser, "u1"),
-		newTextMessage(RoleAssistant, "a1"),
-	}
-
-	require.NoError(t, store.Save(ctx, state, current, archived))
+	require.NoError(t, store.Save(ctx, state, current))
 
 	loadedState, loadedMessages, err := store.Load(ctx)
 	require.NoError(t, err)
@@ -46,26 +40,43 @@ func TestContextManagerFileStore_SaveLoadAndArchive(t *testing.T) {
 
 	indexData, err := os.ReadFile(filepath.Join(dir, "index.json"))
 	require.NoError(t, err)
-	var index map[string]any
+
+	var index contextManagerIndexFile
 	require.NoError(t, json.Unmarshal(indexData, &index))
-	archives, ok := index["archives"].([]any)
-	require.True(t, ok)
-	require.Len(t, archives, 1)
+	require.False(t, index.UpdatedAt.IsZero())
+}
 
-	entries, err := os.ReadDir(filepath.Join(dir, "archives"))
+func TestSmartContextManager_ClearMessages_Clears(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	store := NewContextManagerFileStore(dir)
+
+	cfg := DefaultContextManagerConfig()
+	cfg.Summarizer = testSummarizer{}
+
+	cm, err := NewSmartContextManager(cfg, store)
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	require.Contains(t, entries[0].Name(), "archive-")
-	require.True(t, strings.HasSuffix(entries[0].Name(), ".md"))
 
-	archiveData, err := os.ReadFile(filepath.Join(dir, "archives", entries[0].Name()))
+	ctx := context.Background()
+	cm.AddMessages(ctx,
+		newTextMessage(RoleUser, "hello"),
+		newTextMessage(RoleAssistant, "world"),
+	)
+
+	cm.ClearMessages(ctx)
+	require.Empty(t, cm.Messages(ctx))
+
+	indexData, err := os.ReadFile(filepath.Join(dir, "index.json"))
 	require.NoError(t, err)
 
-	content := string(archiveData)
-	require.Contains(t, content, "# Context Archive")
-	require.Contains(t, content, "Message count**: 2")
-	require.Contains(t, content, "u1")
-	require.Contains(t, content, "a1")
+	var index contextManagerIndexFile
+	require.NoError(t, json.Unmarshal(indexData, &index))
+	require.False(t, index.UpdatedAt.IsZero())
+
+	_, loadedMessages, err := store.Load(ctx)
+	require.NoError(t, err)
+	require.Empty(t, loadedMessages)
 }
 
 func TestContextManagerFileStore_LoadMissingReturnsEmpty(t *testing.T) {

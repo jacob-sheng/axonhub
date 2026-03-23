@@ -5,20 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/looplj/axonhub/axon/task"
 	"github.com/spf13/cobra"
+
+	"github.com/looplj/axonhub/cmd/axonclaw/conf"
 )
 
-type TaskOptions struct {
-	Dir    string
-	Stdout *os.File
-	Stderr *os.File
-}
-
-func NewTaskCommand(opts TaskOptions) *cobra.Command {
+func NewTaskCommand(opts StdioOptions) *cobra.Command {
 	stdout := opts.Stdout
 	if stdout == nil {
 		stdout = os.Stdout
@@ -28,19 +25,15 @@ func NewTaskCommand(opts TaskOptions) *cobra.Command {
 		stderr = os.Stderr
 	}
 
-	var dir string
-	defaultDir := opts.Dir
-	if defaultDir == "" {
-		defaultDir = ".axonclaw"
-	}
-
+	taskDir := filepath.Join(conf.DefaultDir, "tasks")
 	var store *task.Store
+
 	root := &cobra.Command{
 		Use:   "tasks",
 		Short: "Manage local scheduled tasks",
 		Long: `Manage local scheduled tasks that can trigger actions at specific times.
 
-Tasks are stored locally and can send messages to the agent when triggered.
+Tasks are stored locally and can prompt the agent when triggered.
 This is useful for reminders, periodic checks, or scheduled notifications.
 
 Available Commands:
@@ -58,29 +51,31 @@ Trigger Types:
   delay    - One-time execution after a delay (e.g., "10m", "1h", "30s")
 
 Action Types:
-  send_agent_message - Send a message to the agent when triggered
+Task Types:
+  prompt - Prompt the agent when triggered
     Required field: message (string)
+    Optional field: mode (main|isolated), defaults to isolated
 
 Examples:
   # Add a daily reminder at 9:00 AM
   axonclaw tasks add --id daily-reminder --name "Daily Standup" \
-    --trigger-type cron --cron "0 9 * * *" \
-    --action '{"type":"send_agent_message","message":"Time for daily standup!"}'
+    --type prompt --trigger-type cron --cron "0 9 * * *" \
+    --action '{"message":"Time for daily standup!"}'
 
   # Add a task that runs every 30 minutes
   axonclaw tasks add --id periodic-check --name "Periodic Check" \
-    --trigger-type interval --interval "30m" \
-    --action '{"type":"send_agent_message","message":"Check your progress!"}'
+    --type prompt --trigger-type interval --interval "30m" \
+    --action '{"message":"Check your progress!"}'
 
   # Add a one-time reminder
   axonclaw tasks add --id one-time --name "Meeting Reminder" \
-    --trigger-type at --at "2024-01-15T14:30:00Z" \
-    --action '{"type":"send_agent_message","message":"Meeting starts in 5 minutes"}'
+    --type prompt --trigger-type at --at "2024-01-15T14:30:00Z" \
+    --action '{"message":"Meeting starts in 5 minutes","mode":"main"}'
 
   # Add a task that runs after a delay
   axonclaw tasks add --id delayed-task --name "Delayed Notification" \
-    --trigger-type delay --delay "10m" \
-    --action '{"type":"send_agent_message","message":"10 minutes have passed!"}'
+    --type prompt --trigger-type delay --delay "10m" \
+    --action '{"message":"10 minutes have passed!"}'
 
   # List all tasks
   axonclaw tasks list
@@ -97,7 +92,7 @@ Examples:
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			s, err := task.NewStore(dir)
+			s, err := task.NewStore(taskDir)
 			if err != nil {
 				return err
 			}
@@ -107,7 +102,6 @@ Examples:
 	}
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	root.PersistentFlags().StringVar(&dir, "dir", defaultDir, "Task store directory")
 
 	storeGetter := func() *task.Store { return store }
 	root.AddCommand(newTaskListCmd(stdout, storeGetter))
@@ -125,7 +119,7 @@ func newTaskListCmd(out *os.File, store func() *task.Store) *cobra.Command {
 		Use:   "list",
 		Short: "List tasks",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tasks, err := store().Load()
+			tasks, err := store().List()
 			if err != nil {
 				return err
 			}
@@ -171,6 +165,7 @@ func newTaskAddCmd(out *os.File, store func() *task.Store) *cobra.Command {
 		name      string
 		enabled   bool
 		trigType  string
+		taskType  string
 		cronExpr  string
 		interval  string
 		at        string
@@ -186,8 +181,9 @@ func newTaskAddCmd(out *os.File, store func() *task.Store) *cobra.Command {
 
 Required flags:
   --id           Unique task identifier
+  --type         Task type
   --trigger-type Type of trigger (cron|interval|at|delay)
-  --action       Action JSON with type and parameters
+  --action       Action JSON with task parameters
 
 Trigger-specific flags:
   --cron     Cron expression (required for --trigger-type=cron)
@@ -201,16 +197,21 @@ Optional flags:
   --timezone IANA timezone for schedule (e.g., "Asia/Shanghai")
 
 Action format:
-  {"type":"send_agent_message","message":"your message here"}
+  {"message":"your message here","mode":"isolated"}
 
 Examples:
-  axonclaw tasks add --id my-task --trigger-type cron --cron "0 9 * * *" \
-    --action '{"type":"send_agent_message","message":"Good morning!"}'
+  axonclaw tasks add --id my-task --type prompt --trigger-type cron --cron "0 9 * * *" \
+    --action '{"message":"Good morning!"}'
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id = strings.TrimSpace(id)
 			if id == "" {
 				return fmt.Errorf("--id is required")
+			}
+
+			taskType = strings.TrimSpace(taskType)
+			if taskType == "" {
+				return fmt.Errorf("--type is required")
 			}
 			if strings.TrimSpace(actionRaw) == "" {
 				return fmt.Errorf("--action is required")
@@ -220,8 +221,9 @@ Examples:
 			if err := json.Unmarshal([]byte(actionRaw), &action); err != nil {
 				return fmt.Errorf("invalid --action json: %w", err)
 			}
-			if _, ok := action["type"].(string); !ok {
-				return fmt.Errorf("action.type is required and must be string")
+
+			if _, ok := action["type"]; ok {
+				return fmt.Errorf("action.type is no longer supported; use --type instead")
 			}
 
 			trigger := task.Trigger{
@@ -239,6 +241,7 @@ Examples:
 			t := task.Task{
 				ID:      id,
 				Name:    strings.TrimSpace(name),
+				Type:    taskType,
 				Enabled: enabled,
 				Trigger: trigger,
 				Action:  action,
@@ -256,6 +259,7 @@ Examples:
 
 	cmd.Flags().StringVar(&id, "id", "", "Task ID")
 	cmd.Flags().StringVar(&name, "name", "", "Task name")
+	cmd.Flags().StringVar(&taskType, "type", "", "Task type, e.g. prompt")
 	cmd.Flags().BoolVar(&enabled, "enabled", true, "Enable task")
 	cmd.Flags().StringVar(&trigType, "trigger-type", "", "Trigger type: cron|interval|at|delay")
 	cmd.Flags().StringVar(&cronExpr, "cron", "", "Cron expression (for trigger-type=cron)")
@@ -263,7 +267,7 @@ Examples:
 	cmd.Flags().StringVar(&at, "at", "", "RFC3339 time (for trigger-type=at)")
 	cmd.Flags().StringVar(&delay, "delay", "", "Duration, e.g. 10m (for trigger-type=delay)")
 	cmd.Flags().StringVar(&timezone, "timezone", "", "IANA timezone, e.g. Asia/Shanghai")
-	cmd.Flags().StringVar(&actionRaw, "action", "", `Action JSON, e.g. {"type":"send_agent_message","message":"hi"}`)
+	cmd.Flags().StringVar(&actionRaw, "action", "", `Action JSON, e.g. {"message":"hi","mode":"isolated"}`)
 	return cmd
 }
 
